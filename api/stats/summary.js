@@ -9,33 +9,36 @@ function keyOf(obj){
 export default async function handler(req,res){
   const usingKV = !!(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
   try{
-    const { apuestas, resultados } = await obtenerTodo();
-    const join = new Map();
-    for(const a of apuestas){
-      const k = keyOf(a);
-      if(!k) continue;
-      join.set(k, { a, r: null });
-    }
+    const { apuestas = [], resultados = [] } = await obtenerTodo();
+
+    // sets para outcomes
+    const winsSet = new Set();
+    const lossSet = new Set();
     for(const r of resultados){
       const k = keyOf(r);
-      if(!k) continue;
-      const v = join.get(k) || {};
-      v.r = r;
-      join.set(k, v);
+      if(!k || k === '|') continue;
+      if((r.outcome||'').toString().toLowerCase()==='win')  winsSet.add(k);
+      if((r.outcome||'').toString().toLowerCase()==='loss') lossSet.add(k);
     }
 
     let tot=0, wins=0, evSum=0, pnl=0;
-    for(const {a,r} of join.values()){
-      if(!a) continue;
+    const seenKeys = new Set(); // contar por clave única (evento+pick)
+    for(const a of apuestas){
+      const k = keyOf(a);
+      if(!k || k==='|') continue;
+      if(seenKeys.has(k)) continue; // 1 apuesta por clave para el resumen
+      seenKeys.add(k);
       tot++;
       if(typeof a.EV === "number") evSum += a.EV;
-      if(r?.outcome === "win"){
-        pnl += (a.cuota ? (a.cuota - 1) : 1);
+
+      if(winsSet.has(k)){
+        pnl += (typeof a.cuota === 'number' ? (a.cuota - 1) : 1);
         wins++;
-      } else if(r?.outcome === "loss"){
+      } else if(lossSet.has(k)){
         pnl -= 1;
       }
     }
+
     const winrate = tot ? wins/tot : 0;
     const evAvg = tot ? evSum/tot : 0;
 
