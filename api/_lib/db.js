@@ -1,65 +1,64 @@
-// api/_lib/db.js
-export async function logBet(bet) {
+function kv() {
   const url = process.env.KV_REST_API_URL;
   const token = process.env.KV_REST_API_TOKEN;
-
-  const res = await fetch(`${url}/lpush/betbot:bets`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ value: JSON.stringify(bet) }),
-  });
-
-  return res.ok;
+  if (!url || !token) return null;
+  return { url, token };
 }
 
-export async function logResult(result) {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
-
-  const res = await fetch(`${url}/lpush/betbot:results`, {
+async function kvPost(path, body) {
+  const k = kv();
+  if (!k) throw new Error("KV not configured");
+  const r = await fetch(`${k.url}/${path}`, {
     method: "POST",
     headers: {
-      Authorization: `Bearer ${token}`,
-      "Content-Type": "application/json",
+      Authorization: `Bearer ${k.token}`,
+      "Content-Type": "application/json"
     },
-    body: JSON.stringify({ value: JSON.stringify(result) }),
+    body: JSON.stringify(body || {})
   });
-
-  return res.ok;
+  if (!r.ok) throw new Error(`KV POST ${path} -> HTTP ${r.status}`);
+  return r.json();
 }
 
-export async function getSummary() {
-  const url = process.env.KV_REST_API_URL;
-  const token = process.env.KV_REST_API_TOKEN;
+export async function guardarApuesta(apuesta) {
+  const k = kv();
+  if (!k) {
+    globalThis.__mem = globalThis.__mem || { bets: [], results: [] };
+    globalThis.__mem.bets.push(apuesta);
+    return;
+  }
+  // Upstash REST: LPUSH con campo "element"
+  await kvPost("lpush/betbot:bets", { element: JSON.stringify(apuesta) });
+}
 
-  const betsRes = await fetch(`${url}/lrange/betbot:bets/0/999`, {
-    headers: { Authorization: `Bearer ${token}` },
+export async function guardarResultado(resultado) {
+  const k = kv();
+  if (!k) {
+    globalThis.__mem = globalThis.__mem || { bets: [], results: [] };
+    globalThis.__mem.results.push(resultado);
+    return;
+  }
+  await kvPost("lpush/betbot:results", { element: JSON.stringify(resultado) });
+}
+
+export async function obtenerTodo() {
+  const k = kv();
+  if (!k) {
+    const mem = globalThis.__mem || { bets: [], results: [] };
+    return { apuestas: mem.bets, resultados: mem.results };
+  }
+  const betsResp = await fetch(`${k.url}/lrange/betbot:bets/0/999`, {
+    headers: { Authorization: `Bearer ${k.token}` }
   });
-  const resultsRes = await fetch(`${url}/lrange/betbot:results/0/999`, {
-    headers: { Authorization: `Bearer ${token}` },
+  const resResp = await fetch(`${k.url}/lrange/betbot:results/0/999`, {
+    headers: { Authorization: `Bearer ${k.token}` }
   });
+  const betsJson = betsResp.ok ? await betsResp.json() : { result: [] };
+  const resJson  = resResp.ok ? await resResp.json() : { result: [] };
 
-  const bets = (await betsRes.json()).result?.map((b) => JSON.parse(b)) || [];
-  const results = (await resultsRes.json()).result?.map((r) => JSON.parse(r)) || [];
-
-  const wins = results.filter((r) => r.outcome === "win").length;
-  const pnl = results.reduce((acc, r) => {
-    if (r.outcome === "win") return acc + (r.payout - 1);
-    if (r.outcome === "loss") return acc - 1;
-    return acc;
-  }, 0);
-
+  const toObj = (arr) => (arr || []).map(s => { try { return JSON.parse(s); } catch { return null; } }).filter(Boolean);
   return {
-    totals: {
-      bets: bets.length,
-      wins,
-      winrate: bets.length ? wins / bets.length : 0,
-      evAvg: bets.length ? bets.reduce((a, b) => a + (b.EV || 0), 0) / bets.length : 0,
-      pnlUnitStake: pnl,
-    },
+    apuestas: toObj(betsJson.result),
+    resultados: toObj(resJson.result)
   };
 }
-
