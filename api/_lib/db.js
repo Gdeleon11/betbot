@@ -1,3 +1,5 @@
+export const DB_VERSION = 'v2-parseEntry';  // <<< NUEVO
+
 function kv() {
   const url = process.env.KV_REST_API_URL;
   const token = process.env.KV_REST_API_TOKEN;
@@ -27,7 +29,6 @@ export async function guardarApuesta(apuesta) {
     globalThis.__mem.bets.push(apuesta);
     return;
   }
-  // Upstash REST LPUSH
   await kvPost("lpush/betbot:bets", { element: JSON.stringify(apuesta) });
 }
 
@@ -42,7 +43,6 @@ export async function guardarResultado(resultado) {
 }
 
 function parseEntry(x) {
-  // Soporta: "{"ts":...}"  o  {element:"{...}"}
   try {
     const val = typeof x === "string" ? x : (x && typeof x.element === "string" ? x.element : null);
     if (!val) return null;
