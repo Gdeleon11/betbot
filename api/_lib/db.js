@@ -27,7 +27,7 @@ export async function guardarApuesta(apuesta) {
     globalThis.__mem.bets.push(apuesta);
     return;
   }
-  // Upstash REST: LPUSH con campo "element"
+  // Upstash REST LPUSH
   await kvPost("lpush/betbot:bets", { element: JSON.stringify(apuesta) });
 }
 
@@ -41,24 +41,35 @@ export async function guardarResultado(resultado) {
   await kvPost("lpush/betbot:results", { element: JSON.stringify(resultado) });
 }
 
+function parseEntry(x) {
+  // Soporta: "{"ts":...}"  o  {element:"{...}"}
+  try {
+    const val = typeof x === "string" ? x : (x && typeof x.element === "string" ? x.element : null);
+    if (!val) return null;
+    return JSON.parse(val);
+  } catch {
+    return null;
+  }
+}
+
 export async function obtenerTodo() {
   const k = kv();
   if (!k) {
     const mem = globalThis.__mem || { bets: [], results: [] };
     return { apuestas: mem.bets, resultados: mem.results };
   }
-  const betsResp = await fetch(`${k.url}/lrange/betbot:bets/0/999`, {
+  const br = await fetch(`${k.url}/lrange/betbot:bets/0/999`, {
     headers: { Authorization: `Bearer ${k.token}` }
   });
-  const resResp = await fetch(`${k.url}/lrange/betbot:results/0/999`, {
+  const rr = await fetch(`${k.url}/lrange/betbot:results/0/999`, {
     headers: { Authorization: `Bearer ${k.token}` }
   });
-  const betsJson = betsResp.ok ? await betsResp.json() : { result: [] };
-  const resJson  = resResp.ok ? await resResp.json() : { result: [] };
 
-  const toObj = (arr) => (arr || []).map(s => { try { return JSON.parse(s); } catch { return null; } }).filter(Boolean);
-  return {
-    apuestas: toObj(betsJson.result),
-    resultados: toObj(resJson.result)
-  };
+  const bj = br.ok ? await br.json() : { result: [] };
+  const rj = rr.ok ? await rr.json() : { result: [] };
+
+  const apuestas  = (bj.result || []).map(parseEntry).filter(Boolean);
+  const resultados = (rj.result || []).map(parseEntry).filter(Boolean);
+
+  return { apuestas, resultados };
 }
